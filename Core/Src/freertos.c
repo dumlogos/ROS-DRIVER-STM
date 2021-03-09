@@ -359,7 +359,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		  speedErrorIntegral = 0;
 		  speedRegulatorForce = 0;
 		  break;
-	  case CAN_RPi+T_CleanPlot:
+	  case CAN_All+R_CleanPlot:
 		  cleanPlotBool = 1;
 		  break;
 	  case CAN_STM1+R_PositionProportionalRatio:

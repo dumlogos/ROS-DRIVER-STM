@@ -40,7 +40,7 @@ enum RPiCommand{
 
 
 enum ControllerCommand{
-        ConnectionAcknowledge = R_CleanPlot + 1,
+        ConnectionAcknowledge = T_CleanPlot + 1,
         Disconnection,
     //Robot control commands
         MotorMoved,
