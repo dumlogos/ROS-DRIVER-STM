@@ -1,0 +1,6 @@
+freertos.c:149:6:MX_FREERTOS_Init	8	static
+freertos.c:200:6:StartDefaultTask	96	static
+freertos.c:268:6:speedCalculationStart	24	static
+freertos.c:292:6:positionPIDStart	16	static
+freertos.c:310:6:speedPIDStart	16	static
+freertos.c:326:6:HAL_CAN_RxFifo0MsgPendingCallback	56	static
