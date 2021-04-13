@@ -33,6 +33,7 @@ enum RPiCommand{
         MovingStart,
         MovingStop,
     //GUI commands
+		R_AllDataQuery,
 		R_CleanPlot,
         T_CleanPlot
 
@@ -53,35 +54,39 @@ enum ControllerCommand{
         RegulatorRatioTransmitAcknowledge,
         MovingStartedAcknowledge,
         MovingFinishedAcknowedge,
-        DriverStop
+		ToggleLockKey,
+        ToggleStopDriver
 };
 
 enum ControllerData{
-		R_Position = DriverStop + 1,
+		R_Position = ToggleStopDriver + 1,
 		R_Speed,
         T_Position,
         T_Speed,
+		T_Current,
 
         R_PositionProportionalRatio,
-        R_PositionDifferentialRatio,
         R_PositionIntegralRatio,
+        R_PositionDifferentialRatio,
         R_SpeedProportionalRatio,
-        R_SpeedDifferentialRatio,
         R_SpeedIntegralRatio,
+        R_SpeedDifferentialRatio,
 
         T_PositionProportionalRatio,
-        T_PositionDifferentialRatio,
         T_PositionIntegralRatio,
+        T_PositionDifferentialRatio,
         T_SpeedProportionalRatio,
-        T_SpeedDifferentialRatio,
         T_SpeedIntegralRatio,
+        T_SpeedDifferentialRatio,
 
+		T_DriverState
 };
 
 enum DriverState{
        STOP,
        START
 };
+
 
 
 #endif // CAN_ENUM_H

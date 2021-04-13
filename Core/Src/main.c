@@ -47,13 +47,15 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+extern int32_t encoderScaler;
+extern uint32_t encoderValue;
+uint16_t prevCNT;
+uint8_t changed = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
-
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -93,18 +95,19 @@ int main(void)
   MX_GPIO_Init();
   MX_CAN1_Init();
   MX_DAC_Init();
-  MX_TIM5_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Encoder_MspInit(&htim5);
+  HAL_TIM_Encoder_MspInit(&htim1);
+  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_Encoder_Start_IT(&htim1, TIM_CHANNEL_1);
 
-  HAL_TIM_Encoder_Start(&htim5, TIM_CHANNEL_1);
+  TIM1->CNT=0;
 
   driverCANFilterInit();
   HAL_CAN_Start(&hcan1);
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
-  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
-  TIM1->CNT=2147483648-1;
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_2);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -146,8 +149,8 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 12;
-  RCC_OscInitStruct.PLL.PLLN = 192;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 64;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -160,10 +163,10 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV8;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -175,7 +178,7 @@ void SystemClock_Config(void)
 
  /**
   * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM2 interrupt took place, inside
+  * @note   This function is called  when TIM5 interrupt took place, inside
   * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
   * a global variable "uwTick" used as application time base.
   * @param  htim : TIM handle
@@ -186,11 +189,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM2) {
+  if (htim->Instance == TIM5) {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
+  uint16_t CNT = TIM1->CNT;
+  if((int32_t)CNT-prevCNT >= (uint16_t)(0-1)*0.9 && !changed){
+	  encoderScaler -=1;
+	  changed = 1;
+  }
+  else if((int32_t)CNT-prevCNT <= -(uint16_t)(0-1)*0.9 && !changed){
+	  encoderScaler +=1;
+	  changed = 1;
+  }
+  else
+	  changed = 0;
+  prevCNT = CNT;
   /* USER CODE END Callback 1 */
 }
 

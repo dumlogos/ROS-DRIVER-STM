@@ -37,16 +37,29 @@ typedef union{
             float fl1;
             float fl2;
         } floats;
-        struct floatIntM{
-            float fl;
-            int in;
-        } floatInt;
+        struct intsM{
+        	int int1;
+        	int int2;
+        } ints;
     } CAN_TxRx_Data;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+void driverInit();
+void transmitHardCanData(uint32_t CAN_ID, uint32_t DLC, uint8_t data[]);
+void transmitFloatCanData(float data1, uint32_t CAN_ID);
+void transmitIntCanData(int data1, uint32_t CAN_ID);
+void transmitFloatFloatCanData(float data1, float data2, uint32_t CAN_ID);
+void transmitIntIntCanData(int data1, int data2, uint32_t CAN_ID);
+void transmitFloatIntCanData(float data1, int data2, uint32_t CAN_ID);
+void transmitCanCommand(uint32_t COMMAND_CAN_ID);
+double getPosition();
+double getCurrent();
+void setVoltage(float voltage);
+uint16_t voltageToDAC(float voltage);
 
+void transmitAllRatio();
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,30 +69,42 @@ typedef union{
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+int32_t encoderScaler = 0;
+int32_t encoderValue = 0;
+
 extern CAN_HandleTypeDef hcan1;
 extern DAC_HandleTypeDef hdac;
 extern TIM_HandleTypeDef htim1;
 extern int repetitions;
 
-CAN_RxHeaderTypeDef msgHeader;
-CAN_TxRx_Data TxData;
 CAN_TxRx_Data RxData;
+CAN_RxHeaderTypeDef receiveMsgHeader;
+CAN_TxRx_Data TxData;
+CAN_TxHeaderTypeDef transmitMsgHeader;
+
+uint8_t transmitMsgData[8];
+uint32_t transmitMailBoxNum = 0;
+
+uint8_t receiveMsgData[8];
+uint32_t receiveMailBoxNum = 0;
+
+uint32_t msgId = 0;
 
 float positionProportionalRatio = 1;
 float positionIntegralRatio = 0;
 float positionDifferentialRatio = 0;
 
-float speedProportionalRatio = 1;
+float speedProportionalRatio = 0.5;
 float speedIntegralRatio = 0;
 float speedDifferentialRatio = 0;
 
-const float dt = 1;
 float currentTime = 0;
+float prevCurrentTime = 0;
 float regulatorForce = 0;
 
 float currentPosition = 0;
 float previousPosition = 0;
-float desiredPosition = 300;
+float desiredPosition = 2000;
 
 float currentPositionError = 0;
 float previousPositionError = 0;
@@ -89,7 +114,7 @@ float positionRegulatorForce = 0;
 
 float currentSpeed = 0;
 float previousSpeed = 0;
-float desiredSpeed = 300;
+float desiredSpeed = 0;
 
 float currentSpeedError = 0;
 float previousSpeedError = 0;
@@ -104,29 +129,29 @@ uint16_t voltage;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 128 * 4
 };
 /* Definitions for speedTask */
 osThreadId_t speedTaskHandle;
 const osThreadAttr_t speedTask_attributes = {
   .name = "speedTask",
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
-  .stack_size = 128 * 4
 };
 /* Definitions for posPIDTask */
 osThreadId_t posPIDTaskHandle;
 const osThreadAttr_t posPIDTask_attributes = {
   .name = "posPIDTask",
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
-  .stack_size = 128 * 4
 };
 /* Definitions for spdPIDTask */
 osThreadId_t spdPIDTaskHandle;
 const osThreadAttr_t spdPIDTask_attributes = {
   .name = "spdPIDTask",
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
-  .stack_size = 128 * 4
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -140,6 +165,23 @@ void positionPIDStart(void *argument);
 void speedPIDStart(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
+/* Hook prototypes */
+void configureTimerForRunTimeStats(void);
+unsigned long getRunTimeCounterValue(void);
+
+/* USER CODE BEGIN 1 */
+/* Functions needed when configGENERATE_RUN_TIME_STATS is on */
+__weak void configureTimerForRunTimeStats(void)
+{
+
+}
+
+__weak unsigned long getRunTimeCounterValue(void)
+{
+return 0;
+}
+/* USER CODE END 1 */
 
 /**
   * @brief  FreeRTOS initialization
@@ -191,232 +233,324 @@ void MX_FREERTOS_Init(void) {
 }
 
 /* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
-	CAN_TxHeaderTypeDef msgHeader;
-	    uint8_t msgData[1] = {1};
-	    msgHeader.StdId = CAN_STM1 + T_CleanPlot;
-	    msgHeader.DLC = 0;
-	    msgHeader.TransmitGlobalTime = DISABLE;
-	    msgHeader.RTR = CAN_RTR_DATA;
-	    msgHeader.IDE = CAN_ID_STD;
+	float dt = 100;
 
-	    uint32_t mailBoxNum = 0;
-	    uint32_t msgId = 0;
-	    while(1)
-	   	    {
-				HAL_CAN_AddTxMessage(&hcan1, &msgHeader, msgData, &mailBoxNum);
-	    		if(cleanPlotBool){
-	    			cleanPlotBool = 0;
-	    			break;
-	    		}
-				osDelay(1000);
-	   	    }
-	    osDelay(10);
+	transmitMsgHeader.TransmitGlobalTime = DISABLE;
+	transmitMsgHeader.RTR = CAN_RTR_DATA;
+	transmitMsgHeader.IDE = CAN_ID_STD;
+
+	while(!cleanPlotBool){
+		osDelay(10);
+		transmitCanCommand(CAN_RPi + T_CleanPlot);
+	}
+	transmitAllRatio();
+	cleanPlotBool = 0;
+
+
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, ENABLE);
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, ENABLE);
+	osDelay(100);
+
   /* Infinite loop */
   for(;;)
   {
-	if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) != 0)
-	  		  {
-	  		    CAN_TxHeaderTypeDef msgHeader;
-	  		    TxData.floats.fl1 = currentPosition;
-	  		    TxData.floats.fl2 = currentTime;
-	  		    uint8_t msgData[8];
-	  		    msgHeader.StdId = CAN_STM1 + T_Position;
-	  		    msgHeader.DLC = 8;
-	  		    msgHeader.TransmitGlobalTime = DISABLE;
-	  		    msgHeader.RTR = CAN_RTR_DATA;
-	  		    msgHeader.IDE = CAN_ID_STD;
+	transmitFloatFloatCanData(currentPosition, currentTime, CAN_STM1 + T_Position);
+	transmitFloatFloatCanData(currentSpeed, currentTime, CAN_STM1 + T_Speed);
 
-	  		    uint32_t mailBoxNum = 0;
-
-	  		    for (uint8_t i = 0; i < 4; i++)
-	  		    {
-	  		      msgData[i] = TxData.uintData[3-i];
-	  		      msgData[i+4] = TxData.uintData[7-i];
-	  		    }
-
-	  		    HAL_CAN_AddTxMessage(&hcan1, &msgHeader, msgData, &mailBoxNum);
-
-	  		    TxData.floats.fl1 = currentSpeed;
-	  		    msgHeader.StdId = CAN_STM1 + T_Speed;
-	  		    for (uint8_t i = 0; i < 4; i++)
-	  		    {
-	  		      msgData[i] = TxData.uintData[3-i];
-	  		    }
-	  		    HAL_CAN_AddTxMessage(&hcan1, &msgHeader, msgData, &mailBoxNum);
-	  		  }
-    osDelay(20);
+    osDelay(dt);
   }
   /* USER CODE END StartDefaultTask */
 }
 
 /* USER CODE BEGIN Header_speedCalculationStart */
-/**
-* @brief Function implementing the speedTask thread.
-* @param argument: Not used
-* @retval None
-*/
 /* USER CODE END Header_speedCalculationStart */
 void speedCalculationStart(void *argument)
 {
   /* USER CODE BEGIN speedCalculationStart */
-
+  float dt = 10;
   /* Infinite loop */
   for(;;)
   {
+	currentTime += dt/1000;
 	previousPosition = currentPosition;
-	currentPosition = (float)TIM1->CNT*0.36;
-	currentSpeed = currentPosition - previousPosition;
+	currentPosition = getPosition();
+	currentSpeed = (currentPosition - previousPosition)/(dt/1000);
 
-
-    osDelay(5);
+    osDelay(dt);
   }
   /* USER CODE END speedCalculationStart */
 }
 
 /* USER CODE BEGIN Header_positionPIDStart */
-/**
-* @brief Function implementing the posPIDTask thread.
-* @param argument: Not used
-* @retval None
-*/
 /* USER CODE END Header_positionPIDStart */
 void positionPIDStart(void *argument)
 {
   /* USER CODE BEGIN positionPIDStart */
+  float dt = 10;
   /* Infinite loop */
   for(;;)
   {
-    osDelay(10);
+	previousPositionError = currentPositionError;
+	currentPositionError = desiredPosition - currentPosition;
+	positionErrorDifferential = (currentPositionError - previousPositionError)/(dt/1000);
+	positionErrorIntegral += currentPositionError*(dt/1000);
+	positionRegulatorForce = positionProportionalRatio*(currentPositionError +
+														positionDifferentialRatio*positionErrorDifferential+
+														positionIntegralRatio*positionErrorIntegral);
+    osDelay(dt);
   }
   /* USER CODE END positionPIDStart */
 }
 
 /* USER CODE BEGIN Header_speedPIDStart */
-/**
-* @brief Function implementing the spdPIDTask thread.
-* @param argument: Not used
-* @retval None
-*/
 /* USER CODE END Header_speedPIDStart */
 void speedPIDStart(void *argument)
 {
   /* USER CODE BEGIN speedPIDStart */
+  float dt = 20;
   /* Infinite loop */
   for(;;)
   {
-	currentTime += dt/1000;
+	desiredSpeed = positionRegulatorForce;
+	previousSpeedError = currentSpeedError;
+	currentSpeedError = desiredSpeed - currentSpeed;
+	speedErrorDifferential = (currentSpeedError - previousSpeedError)/(dt/1000);
+	speedErrorIntegral += currentSpeedError*(dt/1000);
+	speedRegulatorForce = speedProportionalRatio*(currentSpeedError +
+												  speedDifferentialRatio*speedErrorDifferential+
+												  speedIntegralRatio*speedErrorIntegral);
+	setVoltage(speedRegulatorForce);
 
-
-    osDelay(1);
+    osDelay(dt);
   }
   /* USER CODE END speedPIDStart */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+
+void transmitFloatCanData(float data1, uint32_t CAN_ID){
+
+	CAN_TxRx_Data tData;
+	tData.floats.fl1 = data1;
+	for (uint8_t i = 0; i < 4; i++)
+	{
+		transmitMsgData[i] = tData.uintData[i];
+	}
+	transmitHardCanData(CAN_ID, 4, transmitMsgData);
+}
+
+void transmitIntCanData(int data1, uint32_t CAN_ID){
+
+	CAN_TxRx_Data tData;
+	tData.ints.int1 = data1;
+	for (uint8_t i = 0; i < 4; i++)
+	{
+		transmitMsgData[i] = tData.uintData[i];
+	}
+	transmitHardCanData(CAN_ID, 4, transmitMsgData);
+
+}
+
+void transmitFloatFloatCanData(float data1, float data2, uint32_t CAN_ID){
+
+	CAN_TxRx_Data tData;
+	tData.floats.fl1 = data1;
+	tData.floats.fl2 = data2;
+	for (uint8_t i = 0; i < 4; i++)
+	{
+		transmitMsgData[i] = tData.uintData[i];
+		transmitMsgData[i+4] = tData.uintData[i+4];
+	}
+	transmitHardCanData(CAN_ID, 8, transmitMsgData);
+}
+
+void transmitIntIntCanData(int data1, int data2, uint32_t CAN_ID){
+
+	CAN_TxRx_Data tData;
+	tData.ints.int1 = data1;
+	tData.ints.int2 = data2;
+	for (uint8_t i = 0; i < 4; i++)
+	{
+		transmitMsgData[i] = tData.uintData[i];
+		transmitMsgData[i+4] = tData.uintData[i+4];
+	}
+	transmitHardCanData(CAN_ID, 8, transmitMsgData);
+}
+
+void transmitFloatIntCanData(float data1, int data2, uint32_t CAN_ID){
+
+	CAN_TxRx_Data tData;
+	tData.floats.fl1 = data1;
+	tData.ints.int2 = data2;
+	for (uint8_t i = 0; i < 4; i++)
+	{
+		transmitMsgData[i] = tData.uintData[i];
+		transmitMsgData[i+4] = TxData.uintData[i+4];
+	}
+	transmitHardCanData(CAN_ID, 8, transmitMsgData);
+}
+
+void transmitCanCommand(uint32_t COMMAND_CAN_ID){
+	transmitHardCanData(COMMAND_CAN_ID, 0, transmitMsgData);
+}
+
+void transmitHardCanData(uint32_t CAN_ID, uint32_t DLC, uint8_t data[]){
+	if(HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+	{
+		transmitMsgHeader.StdId = CAN_ID;
+		transmitMsgHeader.DLC = DLC;
+		HAL_CAN_AddTxMessage(&hcan1, &transmitMsgHeader, data, &transmitMailBoxNum);
+	}
+}
+
+void setVoltage(float voltage){
+	HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, voltageToDAC(voltage));
+}
+
+double getPosition(){
+	encoderValue = (uint32_t)(encoderScaler*(uint16_t)(-1)) + (uint32_t)TIM1->CNT;
+	return 0.36*encoderValue;
+}
+
+void transmitAllRatio(){
+	int interval = 50;
+	osDelay(10);
+	transmitFloatCanData(positionProportionalRatio, CAN_STM1 + T_PositionProportionalRatio);
+	while(!HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+		osDelay(interval);
+	transmitFloatCanData(positionIntegralRatio, CAN_STM1 + T_PositionIntegralRatio);
+	while(!HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+		osDelay(interval);
+	transmitFloatCanData(positionDifferentialRatio, 	CAN_STM1 + T_PositionDifferentialRatio);
+	while(!HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+		osDelay(interval);
+	transmitFloatCanData(speedProportionalRatio, 	CAN_STM1 + T_SpeedProportionalRatio);
+	while(!HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+		osDelay(interval);
+	transmitFloatCanData(speedIntegralRatio, 	CAN_STM1 + T_SpeedIntegralRatio);
+	while(!HAL_CAN_GetTxMailboxesFreeLevel(&hcan1))
+		osDelay(interval);
+	transmitFloatCanData(speedDifferentialRatio, 		CAN_STM1 + T_SpeedDifferentialRatio);
+}
+
+void driverInit(){
+
+		transmitAllRatio();
+
+		TIM1->CNT = 0;
+		encoderValue = 0;
+		encoderScaler = 0;
+
+		regulatorForce = 0;
+
+		currentPosition = 0;
+		previousPosition = 0;
+
+		currentPositionError = 0;
+		previousPositionError = 0;
+		positionErrorDifferential = 0;
+		positionErrorIntegral = 0;
+		positionRegulatorForce = 0;
+
+		currentSpeed = 0;
+		previousSpeed = 0;
+		desiredSpeed = 0;
+
+		currentSpeedError = 0;
+		previousSpeedError = 0;
+		speedErrorDifferential = 0;
+		speedErrorIntegral = 0;
+		speedRegulatorForce = 0;
+
+		while(cleanPlotBool)
+		{
+			transmitCanCommand(CAN_STM1 + T_CleanPlot);
+			osDelay(500);
+		}
+		cleanPlotBool = 0;
+
+}
+
+uint16_t voltageToDAC(float voltage){
+	if(voltage > 10)
+		return 0xFFF;
+	else if(voltage < -10)
+		return 0;
+	else
+		return 0xFFF/2 + voltage*204.8;
+}
+
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-  uint32_t msgId = 0;
-  uint8_t msgData[8];
+  HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &receiveMsgHeader, receiveMsgData);
+  msgId = receiveMsgHeader.StdId;
 
-  HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &msgHeader, msgData);
-
-  msgId = msgHeader.StdId;
   switch(msgId){
-  	  case CAN_RPi+Init:
+  	  case CAN_All + Heartbeat:
+	  	  transmitCanCommand(CAN_STM1 + HeartbeatRespond);
+	  	  break;
+  	  case CAN_STM1 + R_Position:
 		  for(int i = 0; i < 4; ++i)
-		  RxData.uintData[i] = msgData[3-i];
+			RxData.uintData[i] = receiveMsgData[3-i];
 		  desiredPosition = RxData.floats.fl1;
-
-		  TIM1->CNT = 1000*32;
-		  regulatorForce = 0;
-
-		  currentPosition = 0;
-		  previousPosition = 0;
-
-		  currentPositionError = 0;
-		  previousPositionError = 0;
-		  positionErrorDifferential = 0;
-		  positionErrorIntegral = 0;
-		  positionRegulatorForce = 0;
-
-		  currentSpeed = 0;
-		  previousSpeed = 0;
-		  desiredSpeed = 0;
-
-		  currentSpeedError = 0;
-		  previousSpeedError = 0;
-		  speedErrorDifferential = 0;
-		  speedErrorIntegral = 0;
-		  speedRegulatorForce = 0;
+	  	  driverInit();
 		  break;
+	  case CAN_RPi+MovingStart:
+	  	  driverInit();
+	  	  break;
 	  case CAN_All+R_CleanPlot:
 		  cleanPlotBool = 1;
+		  transmitAllRatio();
 		  break;
+	  case CAN_All+ToggleLockKey:
+	      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	  	  break;
+	  case CAN_All+ToggleStopDriver:
+	  	  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_12);
+	  	  break;
 	  case CAN_STM1+R_PositionProportionalRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  positionProportionalRatio = RxData.floats.fl1;
+		  transmitFloatCanData(positionProportionalRatio, CAN_STM1+T_PositionProportionalRatio);
 		  break;
 	  case CAN_STM1+R_PositionIntegralRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  positionIntegralRatio = RxData.floats.fl1;
+		  transmitFloatCanData(positionIntegralRatio, CAN_STM1+T_PositionIntegralRatio);
 		  break;
 	  case CAN_STM1+R_PositionDifferentialRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  positionDifferentialRatio = RxData.floats.fl1;
+		  transmitFloatCanData(positionDifferentialRatio, CAN_STM1+T_PositionDifferentialRatio);
 		  break;
 	  case CAN_STM1+R_SpeedProportionalRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  speedProportionalRatio = RxData.floats.fl1;
+		  transmitFloatCanData(speedProportionalRatio, CAN_STM1+T_SpeedProportionalRatio);
 		  break;
 	  case CAN_STM1+R_SpeedIntegralRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  speedIntegralRatio = RxData.floats.fl1;
+		  transmitFloatCanData(speedIntegralRatio, CAN_STM1+T_SpeedIntegralRatio);
 		  break;
 	  case CAN_STM1+R_SpeedDifferentialRatio:
 		  for(int i = 0; i < 4; ++i)
-			 RxData.uintData[i] = msgData[3-i];
+			 RxData.uintData[i] = receiveMsgData[3-i];
 		  speedDifferentialRatio = RxData.floats.fl1;
+		  transmitFloatCanData(speedDifferentialRatio, CAN_STM1+T_SpeedDifferentialRatio);
 		  break;
-	  case CAN_RPi+MovingStart:
-
-		  TIM1->CNT = 2147483648-1;
-
-		  regulatorForce = 0;
-
-		  currentPosition = 0;
-		  previousPosition = 0;
-
-		  currentPositionError = 0;
-		  previousPositionError = 0;
-		  positionErrorDifferential = 0;
-		  positionErrorIntegral = 0;
-		  positionRegulatorForce = 0;
-
-		  currentSpeed = 0;
-		  previousSpeed = 0;
-		  desiredSpeed = 0;
-
-		  currentSpeedError = 0;
-		  previousSpeedError = 0;
-		  speedErrorDifferential = 0;
-		  speedErrorIntegral = 0;
-		  speedRegulatorForce = 0;
-	  	  break;
+//	  case CAN_STM1+R_AllDataQuery:
+//	  	  transmitCanCommand(CAN_RPi+RegulatorRatioReceiveAcknowledge);
   }
 
 }
